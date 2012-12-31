@@ -1,1 +1,9 @@
-This file was created by PyCharm 2.6.3 for binding GitHub repository
+FAT16/32 reader.
+Just run it.
+
+commands:
+h - help
+ls - list current directory
+cd <dir> - cd to <dir>
+cat <filename> - dumps <filename> from image to console
+cp <filename> <external> - copies <filename> from image to an external file specified by <external>
