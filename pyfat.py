@@ -1,5 +1,5 @@
 # coding: utf-8
-import re
+import shlex
 import struct
 import datetime
 from pprint import pprint as pp
@@ -99,24 +99,27 @@ class BasicFS (object):
 
     def find_object(self, seeked, directory_ptr):
         in_this_directory = len(seeked) == 1
-
         for f in directory_ptr.entries():
-            pp(f.name.lower())
             if f.name.lower() == seeked[0].lower():
                 if in_this_directory: return f
                 return self.find_object(seeked[1:], self.read_directory(f))
         return None
 
-    def dump_file_chain(self, chain, out_fname):
-        w = open(out_fname, "wb")
-        for part in self.read_file(chain):
-            w.write(part)
-        w.close()
-
     def print_dir_contents(self, directory_ptr):
         d = self.read_directory(directory_ptr)
+        dirs = []
+        files = []
         for f in d.entries():
-            print f.name, f.cluster
+            if f.is_volume_label: continue
+            elif f.is_directory:
+                dirs.append(f.name)
+            else:
+                files.append((f.size, f.name))
+
+        for d in dirs:
+            print "<DIR>", d
+        for f in files:
+            print f[1], "(%d bytes)" % f[0]
 
 class FS32 (BasicFS):
     def __init__(self, bpb, start):
@@ -176,10 +179,11 @@ class FS16RootDirectory(object):
 
     def entries(self):
         lfn = u""
+        t_ptr = FilePointer(self.ptr)
 
         for i in xrange(0, self.number):
-            entry = DirectoryEntry(self.ptr.read(32))
-            self.ptr = self.ptr + 32
+            entry = DirectoryEntry(t_ptr.read(32))
+            t_ptr = t_ptr + 32
             entry, lfn = DirectoryChain._assemble_entry(entry, lfn)
             if entry is not None:
                 yield entry
@@ -303,6 +307,7 @@ cp <filename> <external> - copies <filename> from image to an external file spec
 
 if __name__ == '__main__':
     fpath = raw_input('fat image file: ')
+    #fpath = "c:/dev/sparse32"
 
     try:
         fat = open(fpath, "rb")
@@ -312,49 +317,62 @@ if __name__ == '__main__':
         cdir = root_dir
 
         cmd = raw_input('cmd (h for help)> ').strip().lower().split(None, 1)
+
         while cmd[0] != 'q':
             if cmd[0] == 'h' or cmd[0] == 'help':
                 print docs
             elif cmd[0] == 'ls':
                 fs.print_dir_contents(cdir)
+
             elif cmd[0] == 'cd':
-                path = cmd[1].split('/\\')
-                obj = fs.find_object(path, cdir)
-                if obj is None:
-                    print "no such directory :("
-                elif not obj.is_directory:
-                    print "not a directory"
+                if len(cmd) < 2:
+                    print "wrong arguments"
                 else:
-                    cdir = fs.read_directory(obj)
+                    path = cmd[1].strip('" ').decode('utf-8').split(u'/')
+                    obj = fs.find_object(path, cdir)
+                    if obj is None:
+                        print "no such directory :("
+                    elif not obj.is_directory:
+                        print "not a directory"
+                    else:
+                        cdir = fs.read_directory(obj)
+
             elif cmd[0] == 'cat':
-                path = cmd[1].split('/\\')
-                obj = fs.find_object(path, cdir)
-                if obj is None:
-                    print "no such file :("
-                elif obj.is_directory or obj.is_volume_label:
-                    print "not a file"
+                if len(cmd) < 2:
+                    print "wrong arguments"
                 else:
-                    for segment in fs.read_file(obj).parts():
-                        print segment
-            elif cmd[0] == 'cp':
-                mtch = re.match('("[^"]+"|[^" ]+) ("[^"]+"|[^" ]+)', cmd[1])
-                if mtch is not None:
-                    src = mtch.group(1).strip(' "')
-                    dst = mtch.group(2).strip(' "')
-                    obj = fs.find_object(src, cdir)
-                    w = open(dst, "wb")
+                    path = cmd[1].strip(' "').decode('utf-8').split(u'/')
+                    obj = fs.find_object(path, cdir)
                     if obj is None:
                         print "no such file :("
                     elif obj.is_directory or obj.is_volume_label:
                         print "not a file"
                     else:
                         for segment in fs.read_file(obj).parts():
+                            print segment
+
+            elif cmd[0] == 'cp':
+                mtch = shlex.split(cmd[1])
+
+                if len(mtch) == 2:
+                    src = mtch[0].decode('utf-8').split(u'/')
+                    dst = mtch[1].decode('utf-8')
+
+                    obj = fs.find_object(src, cdir)
+                    if obj is None:
+                        print "no such file :("
+                    elif obj.is_directory or obj.is_volume_label:
+                        print "not a file"
+                    else:
+                        w = open(dst, "wb")
+                        for segment in fs.read_file(obj).parts():
                             w.write(segment)
+                        w.close()
                 else:
                     print "invalid arguments"
 
-
             cmd = raw_input('cmd (h for help)> ').strip().lower().split(None, 1)
+
 
 
     except IOError:
